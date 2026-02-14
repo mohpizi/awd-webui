@@ -32,10 +32,11 @@ jobs:
 
       - name: 🚀 4. Membuat Release dan Mengunggah ZIP
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           name: Release ${{ github.ref_name }} # Nama rilis otomatis (contoh: Release v1.1)
           files: WebUI-Release.zip
           generate_release_notes: true # Otomatis merangkum riwayat commit sebagai catatan
           draft: false
           prerelease: false
-
