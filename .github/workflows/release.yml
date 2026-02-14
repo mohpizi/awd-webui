@@ -1,6 +1,5 @@
 name: Auto Release ZIP
 
-# Action ini hanya akan berjalan jika Anda mengirim tag berawalan 'v' (contoh: v1.0, v1.5)
 on:
   push:
     tags:
@@ -8,35 +7,21 @@ on:
 
 jobs:
   build-and-release:
-    name: Build ZIP and Publish Release
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Izin WAJIB agar bot bisa membuat Release di repositori Anda
+      contents: write 
       
     steps:
-      - name: 📥 1. Mengambil Kode (Checkout)
+      - name: 📥 Checkout Kode
         uses: actions/checkout@v4
 
-      - name: 📦 2. Mengompres Folder menjadi ZIP
-        run: |
-          echo "Memulai kompresi file..."
-          # Mengompres semua file, mengabaikan folder git dan workflow agar bersih
-          zip -r WebUI-Release.zip . -x "*.git*" ".github/*"
-          echo "Proses kompresi selesai!"
+      - name: 📦 Membuat File ZIP
+        run: zip -r WebUI-Release.zip . -x "*.git*" ".github/*"
 
-      - name: 🔍 3. Cek File ZIP di Log (Debugging)
-        run: |
-          echo "Memeriksa detail file ZIP yang baru saja dibuat:"
-          ls -lh WebUI-Release.zip
-          echo "Jika ukuran file muncul di atas, berarti kompresi berhasil."
-
-      - name: 🚀 4. Membuat Release dan Mengunggah ZIP
-        uses: softprops/action-gh-release@v2
+      - name: 🚀 Membuat Release & Upload ZIP (GitHub CLI)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          name: Release ${{ github.ref_name }} # Nama rilis otomatis (contoh: Release v1.1)
-          files: WebUI-Release.zip
-          generate_release_notes: true # Otomatis merangkum riwayat commit sebagai catatan
-          draft: false
-          prerelease: false
+        run: |
+          gh release create ${{ github.ref_name }} WebUI-Release.zip \
+            --title "Release ${{ github.ref_name }}" \
+            --generate-notes
