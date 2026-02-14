@@ -1,0 +1,28 @@
+name: Auto Release ZIP
+
+# Action ini hanya akan berjalan jika Anda mengirim tag berawalan 'v' (contoh: v1.0)
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write 
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Membuat file ZIP
+        # Mengompres semua file, tapi mengabaikan folder .git dan .github agar ZIP bersih
+        run: |
+          zip -r WebUI-Release.zip . -x "*.git*" ".github/*"
+
+      - name: Membuat Release dan Upload ZIP
+        uses: softprops/action-gh-release@v2
+        with:
+          files: WebUI-Release.zip
+          generate_release_notes: true
