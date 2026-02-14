@@ -11,7 +11,7 @@ echo "--- Info Saat Ini ---"
 grep "^version=" module.prop
 grep "^versionCode=" module.prop
 echo "---------------------"
-version=3.3.3
+version="3.3.5"
 
 if [ -z "$NEW_VERSION" ]; then
     echo "❌ Versi tidak boleh kosong! Dibatalkan."
