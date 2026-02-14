@@ -1,0 +1,93 @@
+#!/system/bin/sh
+
+MODDIR=${0%/*}
+LOG_FILE="$MODDIR/connection.log"
+PID_FILE="$MODDIR/connection.pid"
+timeout_count=0
+url=https://www.gstatic.com/generate_204
+to=7
+
+get_host_from_url() {
+    local u="$1"
+    u="${u#*://}"
+    u="${u%%/*}"
+    u="${u##*@}"
+    u="${u%%:*}"
+    echo "$u"
+}
+
+PING_HOST=$(get_host_from_url "$url")
+
+if [ -z "$PING_HOST" ]; then
+    echo "Unable to get host from url '$url'" >&2
+    exit 1
+fi
+
+[ ! -f "$LOG_FILE" ] && touch "$LOG_FILE"
+
+echo $$ > "$PID_FILE"
+
+cleanup() {
+    rm -f "$PID_FILE"
+    exit 0
+}
+
+trap cleanup EXIT TERM INT
+
+log_message() {
+    local message="$1"
+    local timestamp
+    timestamp=$(date "+%H:%M:%S")
+    echo "[$timestamp] $message" >> "$LOG_FILE"
+    if [ "$(wc -l < "$LOG_FILE")" -gt 50 ]; then
+        tail -n 50 "$LOG_FILE" > "$LOG_FILE.temp" && mv "$LOG_FILE.temp" "$LOG_FILE"
+    fi
+}
+
+log_message "Starting automatic airplane mode task with URL/Host $url / $PING_HOST"
+
+while true; do
+    ping_output=$(ping -c 1 -W 3 "$PING_HOST" 2>&1)
+    ping_exit=$?
+
+    if [ $ping_exit -eq 0 ]; then
+        time_ms=$(echo "$ping_output" | awk -F'time=' '/time=/{print $2; exit}' | awk '{print $1}')
+        time_ms=$(echo "$time_ms" | sed 's/ms//g' | tr -d '\r' | tr ',' '.')
+        [ -z "$time_ms" ] && time_ms="0.000"
+        clean_time=$(echo "$time_ms" | sed -E 's/^0+\.0*//;s/^0+\.//')
+        [ -z "$clean_time" ] && clean_time="0"
+        http_code=$(curl -I -m 5 -s -o /dev/null -w "%{http_code}" "$url")
+        [ -z "$http_code" ] && http_code="000"
+
+        case "$http_code" in
+            200|204)
+                timeout_count=0
+                log_message "Active Connection, HTTP=(${http_code}), latency=(${clean_time}ms)"
+                ;;
+            *)
+                ((timeout_count++))
+                log_message "Connection Lost $timeout_count/$to (Network unreachable, HTTP=(${http_code}))"
+                ;;
+        esac
+    else
+        ((timeout_count++))
+        reason=$(echo "$ping_output" | head -n1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        log_message "Connection Lost $timeout_count/$to ($reason)"
+    fi
+
+    if [ "$timeout_count" -ge "$to" ]; then
+        log_message "Enable Airplane Mode"
+        settings put global airplane_mode_radios cell,bluetooth
+        settings put global airplane_mode_on 1
+        settings get global airplane_mode_radios >> "$LOG_FILE" 2>&1
+        am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true
+        sleep 2
+        log_message "Disable Airplane Mode"
+        settings put global airplane_mode_on 0
+        am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false
+        sleep 5
+        timeout_count=0
+    fi
+
+    sleep 1
+done

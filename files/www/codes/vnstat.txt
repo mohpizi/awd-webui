@@ -1,0 +1,25 @@
+/Cara setup vnstat bandwidth.
+/vnstat bandwidth adalah alat monitoring bandwidth berbasis CLI (Command Line Interface) yang digunakan untuk melacak penggunaan bandwidth pada antarmuka jaringan di sistem berbasis Linux dan BSD.
+/copas code dibawah
+pkg i -y root-repo
+pkg i -y termux-services vnstat vnstati
+/Restart Termux (mulai ulang Termux), kemudian buka lagi.
+sv-enable vnstat
+mkdir -p $HOME/.termux/boot
+cd $HOME/.termux/boot
+cat > ./vnstat-service <<EOF
+#!/data/data/com.termux/files/usr/bin/sh
+termux-wake-lock
+sv up vnstat
+EOF
+su -c 'cat > /data/adb/service.d/vnstat.sh <<EOF #!/system/bin/sh
+(
+until [ $(getprop init.svc.bootanim) = "stopped" do
+sleep 10
+done
+PATH=/data/data/com.termux/files/usr/bin
+LD_PRELOAD=/data/data/com.termux/files/usr/lib/libte rmux-exec.so PREFIX=/data/data/com.termux/files/usr
+vnstatd -d
+) &
+su -c 'chmod +x /data/adb/service.d/vnstat.sh'
+/Selesai, diperlukan reboot.

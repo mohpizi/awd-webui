@@ -1,0 +1,326 @@
+###################
+tproxy-port: 9898
+redir-port: 9797
+port: 7890
+socks-port: 7891
+mixed-port: 7893
+mode: rule
+log-level: silent
+allow-lan: true
+ipv6: false
+geodata-loader: memconservative
+bind-address: "*"
+external-controller: 0.0.0.0:9090
+external-ui: "/data/adb/box/clash/dashboard"
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: redir-host
+  dns-hijack:
+    - any:53
+  listen: 0.0.0.0:7874
+  use-hosts: true
+  default-nameserver:
+    - 8.8.8.8
+    - 1.1.1.1 
+  nameserver:
+    - 8.8.8.8
+    - 1.1.1.1
+    - https://dns.google/dns-query
+  nameserver-policy:
+    "+.seabank.co.id,+.seabank.id": [8.8.8.8, 1.1.1.1]
+    "+.neobank.id,+.bankneo.co.id,+.bnc.id": [8.8.8.8, 1.1.1.1]
+    "+.jago.com,+.artajasa.co.id": [8.8.8.8, 1.1.1.1]
+    "+.blu.id,+.bcadigital.co.id": [8.8.8.8, 1.1.1.1]
+    "+.aladinbank.id": [8.8.8.8, 1.1.1.1]
+    "+.jenius.com,+.btpn.com,+.btpns.com": [8.8.8.8, 1.1.1.1]
+    "+.allobank.com": [8.8.8.8, 1.1.1.1]
+    "+.linebank.co.id": [8.8.8.8, 1.1.1.1]
+    "+.digibank.id,+.dbs.com": [8.8.8.8, 1.1.1.1]
+    "+.nanovest.io": [8.8.8.8, 1.1.1.1]
+    "+.tyme.id": [8.8.8.8, 1.1.1.1]
+    "+.bca.co.id,+.klikbca.com,+.prakerja.go.id": [8.8.8.8, 1.1.1.1]
+    "+.bankmandiri.co.id,+.livinbymandiri.com,+.mandirifp.co.id": [8.8.8.8, 1.1.1.1]
+    "+.bri.co.id,+.brimo.bri.co.id,+.bangga-berinvestasi.com": [8.8.8.8, 1.1.1.1]
+    "+.bni.co.id,+.bni-mobilebanking.bisnis.com": [8.8.8.8, 1.1.1.1]
+    "+.cimbniaga.co.id,+.octoclicks.co.id": [8.8.8.8, 1.1.1.1]
+    "+.permatabank.com,+.permatanet.com": [8.8.8.8, 1.1.1.1]
+    "+.bankbsi.co.id": [8.8.8.8, 1.1.1.1]
+    "+.danamon.co.id": [8.8.8.8, 1.1.1.1]
+    "+.maybank.co.id": [8.8.8.8, 1.1.1.1]
+    "+.ocbc.id,+.ocbcnisp.com": [8.8.8.8, 1.1.1.1]
+    "+.panin.co.id": [8.8.8.8, 1.1.1.1]
+    "+.btn.co.id": [8.8.8.8, 1.1.1.1]
+    "+.dana.id,+.danamon.co.id": [8.8.8.8, 1.1.1.1]
+    "+.ovo.id": [8.8.8.8, 1.1.1.1]
+    "+.linkaja.id": [8.8.8.8, 1.1.1.1]
+    "+.go-jek.com,+.gopay.co.id": [8.8.8.8, 1.1.1.1]
+    "+.shopeepay.id,+.shopee.co.id": [8.8.8.8, 1.1.1.1]
+    "+.astrapay.com": [8.8.8.8, 1.1.1.1]
+    "+.flip.id": [8.8.8.8, 1.1.1.1]
+    "+.bi.go.id,+.qris.id": [8.8.8.8, 1.1.1.1]
+    "+.bibit.id,+.stockbit.com": [8.8.8.8, 1.1.1.1]
+    "+.ajaib.co.id": [8.8.8.8, 1.1.1.1]
+    "+.pluang.com": [8.8.8.8, 1.1.1.1]
+
+sniffer:
+  enable: true
+  sniff:
+    http: { ports: [80, 8080-8888], override-destination: true }
+    tls: { ports: [443, 8443], override-destination: true }
+    quic: { ports: [443, 8443], override-destination: true }
+#####################
+proxy-providers:
+  AKUN-VPN:
+    type: file
+    path: "./proxy_provider/AKUN-VPN.yaml"
+    health-check:
+      enable: true
+      url: http://www.gstatic.com/generate_204
+      interval: 30
+
+proxy-groups:
+- name: SPEEDTEST ⚡
+  type: select
+  strategy: round-robin
+  disable-udp: false
+  use:
+  - AKUN-VPN
+  url: http://www.gstatic.com/generate_204
+  interval: '120'
+- name: "INTERNET-UMUM \U0001F30F"
+  type: select
+  disable-udp: false
+  proxies:
+  - BALANCE
+  - FALLBACK
+  - BESTPING 🌍
+  use:
+  - AKUN-VPN
+  url: http://www.gstatic.com/generate_204
+  interval: '120'
+- name: "SOSIAL-MEDIA \U0001F4F2"
+  type: select
+  disable-udp: false
+  proxies:
+  - BALANCE
+  - FALLBACK
+  - BESTPING 🌍
+  use:
+  - AKUN-VPN
+  url: http://www.gstatic.com/generate_204
+  interval: '120'
+- name: "STREAMING \U0001F4FD️"
+  type: select
+  disable-udp: false
+  proxies:
+  - BALANCE
+  - FALLBACK
+  - BESTPING 🌍
+  use:
+  - AKUN-VPN
+  url: http://www.gstatic.com/generate_204
+  interval: '120'
+- name: "TRAFIK-AKUN-INDO \U0001F6D1"
+  type: select
+  strategy: round-robin
+  disable-udp: false
+  proxies:
+  - BALANCE
+  - FALLBACK
+  - BESTPING 🌍
+  use:
+  - AKUN-VPN
+  url: http://www.gstatic.com/generate_204
+  interval: '120'
+- name: "PLAY-IN-GAME \U0001F3AE"
+  type: select
+  disable-udp: false
+  proxies:
+  - DIRECT
+  - FALLBACK
+  - BESTPING 🌍
+  use:
+  - AKUN-VPN
+  url: http://www.gstatic.com/generate_204
+  interval: '120'
+- name: "DOWNLOAD-DATA-GAME \U0001F579️"
+  type: select
+  disable-udp: false
+  proxies:
+  - DIRECT
+  - FALLBACK
+  - BESTPING 🌍
+  use:
+  - AKUN-VPN
+  url: http://www.gstatic.com/generate_204
+  interval: '120'
+- name: "BANK-BELANJA-EWALLET \U0001F4B0"
+  type: select
+  disable-udp: false
+  proxies:
+  - DIRECT
+  - FALLBACK
+  - BESTPING 🌍
+  use:
+  - AKUN-VPN
+  url: http://www.gstatic.com/generate_204
+  interval: '120'
+- name: "CALL-WHATSAPP \U0001F4DE"
+  type: select
+  strategy: round-robin
+  disable-udp: false
+  proxies:
+  - DIRECT
+  - FALLBACK
+  - BESTPING 🌍
+  use:
+  - AKUN-VPN
+  url: http://www.gstatic.com/generate_204
+  interval: '120'
+- name: JALUR-DIRECT 📡
+  type: select
+  disable-udp: false
+  proxies:
+  - DIRECT
+  - FALLBACK
+  - BESTPING 🌍
+  use:
+  - AKUN-VPN
+  url: http://www.gstatic.com/generate_204
+  interval: '120'
+- name: BLOKIR-IKLAN ❌
+  type: select
+  strategy: round-robin
+  disable-udp: false
+  proxies:
+  - REJECT
+  - FALLBACK
+  - BESTPING 🌍
+  use:
+  - AKUN-VPN
+  url: http://www.gstatic.com/generate_204
+  interval: '120'
+- name: TRAFFIC-PORN 🔞
+  type: select
+  strategy: round-robin
+  disable-udp: false
+  proxies:
+  - REJECT
+  - FALLBACK
+  - BESTPING 🌍
+  use:
+  - AKUN-VPN
+  url: http://www.gstatic.com/generate_204
+  interval: '120'
+- name: BALANCE
+  type: load-balance
+  strategy: round-robin
+  disable-udp: false
+  use:
+  - AKUN-VPN
+  url: http://www.gstatic.com/generate_204
+  interval: '300'
+- name: FALLBACK
+  type: fallback
+  strategy: round-robin
+  disable-udp: false
+  use:
+  - AKUN-VPN
+  url: http://www.gstatic.com/generate_204
+  interval: '300'
+- name: BESTPING 🌍
+  type: url-test
+  strategy: round-robin
+  disable-udp: false
+  use:
+  - AKUN-VPN
+  url: http://www.gstatic.com/generate_204
+  interval: '300'
+      
+rule-providers:
+  rule_game-tcp:
+    type: file
+    behavior: classical
+    path: "./rule_provider/rule_playgame-tcp.yaml"
+  rule_game-udp:
+    type: file
+    behavior: classical
+    path: "./rule_provider/rule_playgame-udp.yaml"
+  rule_gaming:
+    type: file
+    behavior: classical
+    path: "./rule_provider/rule-gaming.yaml"
+  rule_sosmed:
+    type: file
+    behavior: classical
+    path: "./rule_provider/rule-sosmed.yaml"
+  rule_streaming:
+    type: file
+    behavior: classical
+    path: "./rule_provider/rule-streaming.yaml"
+  rule_speedtest:
+    type: file
+    behavior: classical
+    path: "./rule_provider/rule-speedtest.yaml"
+  rule_callwa:
+    type: file
+    behavior: classical
+    path: "./rule_provider/rule_callwa.yaml"  
+  rule_porn:
+    type: http
+    behavior: domain
+    url: https://raw.githubusercontent.com/malikshi/open_clash/main/rule_provider/rule_porn.yaml
+    path: "./rule_provider/rule_porn.yaml"
+    interval: 86400
+  rule_nsfw:
+    type: http
+    behavior: domain
+    url: https://raw.githubusercontent.com/malikshi/open_clash/main/rule_provider/rule_nsfw.yaml
+    path: "./rule_provider/rule_nsfw.yaml"
+    interval: 43200
+  rule_basicads:
+    type: http
+    behavior: domain
+    url: https://raw.githubusercontent.com/bigdargon/hostsVN/master/option/hostsVN-open-clash-rule.yaml
+    path: "./rule_provider/rule_basicads.yaml"
+    interval: 43200
+  rule_belanja:
+    type: file
+    behavior: classical
+    path: "./rule_provider/rule_belanja.yaml" 
+  rule_indo:
+    type: file
+    behavior: classical
+    path: "./rule_provider/rule_indo.yaml"
+  rule_disneyplus:
+    type: file
+    behavior: classical
+    path: "./rule_provider/rule_disneyplus.yaml"
+  rule_netflix:
+    type: file
+    behavior: domain
+    path: "./rule_provider/rule_netflix.yaml"
+  rule_direct:
+    type: file
+    behavior: domain
+    path: "./rule_provider/0-DIRECT.yaml"
+      
+rules:
+- IP-CIDR,198.18.0.1/16,REJECT,no-resolve
+- RULE-SET,rule_direct,JALUR-DIRECT 📡
+- RULE-SET,rule_sosmed,SOSIAL-MEDIA 📲
+- RULE-SET,rule_streaming,STREAMING 📽️
+- RULE-SET,rule_indo,TRAFIK-AKUN-INDO 🛑
+- RULE-SET,rule_disneyplus,TRAFIK-AKUN-INDO 🛑
+- RULE-SET,rule_netflix,TRAFIK-AKUN-INDO 🛑
+- RULE-SET,rule_belanja,BANK-BELANJA-EWALLET 💰
+- RULE-SET,rule_gaming,DOWNLOAD-DATA-GAME 🕹️
+- RULE-SET,rule_game-tcp,PLAY-IN-GAME 🎮,tcp
+- RULE-SET,rule_game-udp,PLAY-IN-GAME 🎮,udp
+- RULE-SET,rule_speedtest,SPEEDTEST ⚡
+- RULE-SET,rule_callwa,CALL-WHATSAPP 📞
+- RULE-SET,rule_basicads,BLOKIR-IKLAN ❌
+- RULE-SET,rule_porn,TRAFFIC-PORN 🔞
+- RULE-SET,rule_nsfw,TRAFFIC-PORN 🔞
+- MATCH, GLOBAL 

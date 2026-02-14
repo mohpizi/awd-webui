@@ -1,0 +1,14 @@
+/Cara setup Tailscale Magisk.
+/Tailscale Magisk cocok untuk akses jarak jauh ke perangkat pribadi, atau membuat jaringan internal tanpa perlu setup VPN manual.
+/Install module Tailscale Magisk
+/setelah proses instalasi selesai, reboot device
+/tunggu beberapa saat biar service Tailscalenya running, kemudian buka Termux
+/copas code dibawah
+su -c tailscale login
+/lalu muncul berupa link.
+/copy link tersebut, kemudian paste di browser dan lanjut login
+/setelah login selesai balik ke Termux
+/jika ada log di Termux success maka berhasil.
+/kalau tidak ada, terkadang harus install ulang lagi modulenya
+/Selesai.
+/Memerlukan Termux

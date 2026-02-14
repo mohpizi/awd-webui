@@ -1,0 +1,12 @@
+#!/system/bin/sh
+
+scripts_dir=$(dirname $(realpath "$0"))
+service_path="${scripts_dir}/php_run"
+
+if [ "$3" = "disable" ]; then
+  if [ "$1" = "d" ]; then
+    sh "$service_path" -s
+  elif [ "$1" = "n" ]; then
+    sh "$service_path" -k
+  fi
+fi

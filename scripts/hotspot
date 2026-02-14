@@ -1,0 +1,72 @@
+#!/system/bin/sh
+
+# 1. Tangkap Argumen dari PHP
+NEW_SSID="$1"
+NEW_PASS="$2"
+LOG_FILE="/data/local/tmp/wifi_log.txt"
+
+# Fungsi Logging
+log() {
+    echo "$(date) - $1" >> "$LOG_FILE"
+}
+
+log "Memulai proses ganti wifi (Universal Mode)..."
+log "Target SSID: $NEW_SSID"
+
+# 2. Cek File Target (Otomatis)
+# Prioritas ke path APEX (Android 11+)
+if [ -f "/data/misc/apexdata/com.android.wifi/WifiConfigStoreSoftAp.xml" ]; then
+    TARGET="/data/misc/apexdata/com.android.wifi/WifiConfigStoreSoftAp.xml"
+elif [ -f "/data/misc/wifi/WifiConfigStoreSoftAp.xml" ]; then
+    TARGET="/data/misc/wifi/WifiConfigStoreSoftAp.xml"
+elif [ -f "/data/misc/wifi/softap.conf" ]; then
+    TARGET="/data/misc/wifi/softap.conf"
+else
+    log "Error: File konfigurasi tidak ditemukan!"
+    exit 1
+fi
+
+log "Target File: $TARGET"
+
+# 3. Matikan Wifi & Tethering (PENTING)
+# Matikan tethering secara eksplisit agar config tidak di-lock system
+cmd connectivity stop-tethering
+svc wifi disable
+cmd wifi set-wifi-enabled disabled
+sleep 2
+
+# 4. Definisi Tool SED
+SED_BIN="sed"
+
+# 5. EKSEKUSI PENGGANTIAN (SED)
+# Kita jalankan beberapa perintah sed untuk mencakup berbagai format XML Android.
+# Sed tidak akan error jika pola tidak ditemukan, jadi aman dijalankan berurutan.
+
+# --- Tipe 1: Format Lama/Simpel (Android 10 ke bawah / Vendor Skin tertentu) ---
+# Format: <string name="SSID">Namanya</string>
+$SED_BIN -i "s|<string name=\"SSID\">.*</string>|<string name=\"SSID\">$NEW_SSID</string>|" "$TARGET"
+$SED_BIN -i "s|<string name=\"Passphrase\">.*</string>|<string name=\"Passphrase\">$NEW_PASS</string>|" "$TARGET"
+
+# --- Tipe 2: Format Baru (Android 11 - 16 AOSP/Pixel) ---
+# Format: <string name="WifiSsid">&quot;Namanya&quot;</string>
+# Penjelasan: \&quot; adalah cara menulis &quot; agar dibaca sebagai teks literal oleh sed
+
+# Ganti SSID (Tag: WifiSsid dengan &quot;)
+$SED_BIN -i "s|<string name=\"WifiSsid\">\&quot;.*\&quot;</string>|<string name=\"WifiSsid\">\&quot;$NEW_SSID\&quot;</string>|" "$TARGET"
+
+# Ganti Password (Tag: Passphrase dengan &quot;)
+$SED_BIN -i "s|<string name=\"Passphrase\">\&quot;.*\&quot;</string>|<string name=\"Passphrase\">\&quot;$NEW_PASS\&quot;</string>|" "$TARGET"
+
+# Ganti Password Alternatif (Tag: PreSharedKey dengan &quot; - Beberapa vendor pakai ini)
+$SED_BIN -i "s|<string name=\"PreSharedKey\">\&quot;.*\&quot;</string>|<string name=\"PreSharedKey\">\&quot;$NEW_PASS\&quot;</string>|" "$TARGET"
+
+# 6. Perbaiki Izin File (Wajib!)
+# Kembalikan owner ke system/wifi agar Android bisa membacanya saat boot
+chown 1000:1000 "$TARGET"
+chmod 600 "$TARGET"
+
+# 7. Sync ke Disk
+sync
+
+log "Konfigurasi disimpan. Meminta reboot..."
+echo "SUCCESS"

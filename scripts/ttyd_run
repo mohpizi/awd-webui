@@ -1,0 +1,77 @@
+#!/system/bin/sh
+
+scripts=`realpath $0`
+scripts_dir=`dirname ${scripts}`
+. /data/adb/php8/files/config/php.config
+
+ttyd_bin="${wserv_path}/files/bin/ttyd"
+
+start_ttyd() {
+    # 1. Cek apakah fitur dimatikan di config
+    if [ "${ttyd_run}" = "0" ]; then
+        echo "[INFO] : TTYD disabled in config" >> ${php_log_path}
+        exit 1
+    fi
+
+    # 2. Cek apakah TTYD SUDAH BERJALAN (Fix Logic Error)
+    if [ -f "${ttyd_pid_path}" ]; then
+        local ttyd_pid=`cat ${ttyd_pid_path}`
+        # Cek apakah proses dengan PID tersebut masih ada
+        if [ -d "/proc/${ttyd_pid}" ]; then
+             echo "[INFO] : TTYD Terminal is ALREADY running (PID: $ttyd_pid)" >> ${php_log_path}
+             return 0 # Berhenti di sini, jangan lanjut start
+        else
+             # File PID ada tapi proses mati (stale PID), hapus file
+             rm -f "${ttyd_pid_path}"
+        fi
+    fi
+
+    # 3. Proses Start Baru
+    if [ -f "${ttyd_bin}" ] ; then
+        # Set permission
+        chown 0:0 "${ttyd_bin}"
+        chmod +x "${ttyd_bin}"
+        
+        # Jalankan TTYD
+        # FIX: Hapus :3005 pada setuidgid. Cukup '0' (root) agar akses lancar.
+        # Log output dibuang ke /dev/null agar tidak memenuhi disk
+        nohup ${busybox_path} setuidgid 0 ${ttyd_bin} -p ${ttyd_port} -W ${ttyd_firstcmd} > /dev/null 2>&1 &
+        
+        # Simpan PID proses terakhir ($!)
+        echo -n $! > "${ttyd_pid_path}"
+        
+        echo "[INFO] : TTYD Terminal Started (PID: `cat ${ttyd_pid_path}`)" >> ${php_log_path}
+        echo "[INFO] : TTYD PORT : ${ttyd_port}" >> ${php_log_path}
+    else
+        echo "[ERR] : TTYD Binary not found at ${ttyd_bin}" >> ${php_log_path}
+        exit 1
+    fi
+}
+
+stop_ttyd() {
+    # Cek dulu apakah file PID ada (Fix Error Stop)
+    if [ -f "${ttyd_pid_path}" ]; then
+        local pid=`cat ${ttyd_pid_path}`
+        if [ -n "$pid" ]; then
+            kill -9 $pid > /dev/null 2>&1
+            rm -f "${ttyd_pid_path}"
+            echo "[INFO] : TTYD Terminal stopped." >> ${php_log_path}
+        fi
+    else
+        echo "[INFO] : TTYD is not running (No PID file)." >> ${php_log_path}
+    fi
+}
+
+while getopts ":sk" signal ; do
+    case ${signal} in
+        s)
+            start_ttyd
+            ;;
+        k)
+            stop_ttyd
+            ;;
+        ?)
+            echo "Usage: $0 -s (start) | -k (stop)"
+            ;;
+    esac
+done

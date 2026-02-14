@@ -1,0 +1,6 @@
+/aktifkan di menu 
+/System
+/StartUp
+/aktifkan Enable On Boot
+/Save Configuration
+/Reboot / Cabut Power

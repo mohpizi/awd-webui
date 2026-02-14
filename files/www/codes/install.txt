@@ -1,0 +1,16 @@
+/Pastikan terinstall
+/1. Termux
+/2. Termux:API
+/3. Termux:boot (Opsional)
+/Selanjutnya buka Termux copas d bawah ini ke Termux:
+pkg update && pkg upgrade -y
+/Enter
+pkg install root-repo
+/Enter
+pkg install vnstat vnstati python ffmpeg termux-api ttyd 
+/Enter
+/Buka termux:API
+/Beri semua izin / permission di info aplikasi
+/Termux:boot kegunaanya ada di menu ttyd
+/REBOOT / CABUT DAYA
+/SELESAI

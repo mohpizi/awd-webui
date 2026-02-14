@@ -1,0 +1,54 @@
+#!/system/bin/sh
+
+# 1. SETUP & LOAD CONFIG
+scripts=`realpath $0`
+scripts_dir=`dirname ${scripts}`
+
+if [ -f "/data/adb/php8/files/config/php.config" ]; then
+    . /data/adb/php8/files/config/php.config
+else
+    echo "Error: Config file not found"
+    exit 1
+fi
+
+# 2. DEFINISI VARIABEL PENTING
+# Pastikan path ini sesuai dengan instalasi Termux standar
+TERMUX_HOME="/data/data/com.termux/files/home"
+TERMUX_USR="/data/data/com.termux/files/usr"
+TARGET_BIN="${tmux_bin_path}/bash"
+
+# 3. AMBIL UID PEMILIK TERMUX
+# Kita ambil UID dari file bash termux agar permission sesuai
+if [ -f "$TARGET_BIN" ]; then
+    user_uid=`stat -c %u ${TARGET_BIN}`
+else
+    echo "Error: Bash Termux binary not found at $TARGET_BIN"
+    exit 1
+fi
+
+# 4. EXPORT ENVIRONMENT (SOLUSI ERROR 'HOME NOT SET')
+# Kita harus meng-export variabel ini agar terbaca oleh shell baru
+export HOME="${TERMUX_HOME}"
+export PREFIX="${TERMUX_USR}"
+export TMPDIR="${TERMUX_USR}/tmp"
+export PATH="${tmux_bin_path}:${PATH}"
+export TERM="xterm-256color"
+export LANG="C.UTF-8"
+
+# 5. PINDAH DIREKTORI KE HOME TERMUX
+if [ -d "${TERMUX_HOME}" ]; then
+    cd "${TERMUX_HOME}"
+else
+    # Fallback jika folder home tidak ada
+    cd /data/local/tmp
+    echo "Warning: Termux home dir not found."
+fi
+
+# 6. EKSEKUSI BASH SEBAGAI USER TERMUX
+# Penjelasan command:
+# exec          : Menggantikan proses saat ini (hemat RAM)
+# setuidgid     : Menjalankan perintah sebagai user ID Termux ($user_uid)
+# env ...       : Memaksa variabel HOME, PREFIX, dll diteruskan ke dalam shell
+# bash -l       : Menjalankan bash sebagai 'login shell' (agar membaca .bashrc)
+
+exec ${busybox_path} setuidgid $user_uid env HOME=$HOME PREFIX=$PREFIX TERM=$TERM $TARGET_BIN -l

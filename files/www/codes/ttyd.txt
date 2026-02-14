@@ -1,0 +1,27 @@
+/ OPSIONAL, JIKA INGIN TTYD TERMINAL TERHUBUNG KE TERMUX DAN BISA DIAKSES MELALUI BROWSER. INSTALLASINYA DIBAWAH INI
+/ COPAS CODE DIBAWAH :
+apt-get update
+apt-get upgrade
+pkg install php
+pkg install ttyd
+/ UNTUK MEMBUAT TTYD BOOT DAN JALAN KETIKA REBOOT.
+mkdir -p $HOME/.termux/boot
+cd $HOME/.termux/boot
+cat > ./ttyd-service.sh <<EOF
+#!/data/data/com.termux/files/usr/bin/sh
+termux-wake-lock
+ttyd -p 3001 -W -t enableTrzsz=true bash
+EOF
+/ Kemudian buka file manager atau mt manager langsung ke jalur /data/adb/php7/files/config/
+/ Lalu edit file php.config
+/ edit di line 48, Ubah angka 1 jadi 0 lalu simpan.
+/Selesai, diperlukan reboot.
+/Jika langkah di atas sudah dilakukan semua tetapi masih belum berhasil, lanjut langkah di bawah.
+/copas code dibawah
+termux-change-repo
+/select "main repository"
+/Then select "Mirror b6 BFSU"
+/Ok
+/restart your app
+/Selesai.
+/Memerlukan Termux dan Termux:boot

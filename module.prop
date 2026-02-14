@@ -1,0 +1,6 @@
+id=php8-webserver
+name=PHP-8 WebUI
+version=v3.3.3
+versionCode=20260112
+author=arewedaks.t.me
+description= PHP8 Webserver Modules for Magisk / KernelSU / Apatch
