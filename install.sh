@@ -13,7 +13,7 @@ grep "^versionCode=" module.prop
 echo "---------------------"
 version="3.3.5"
 
-if [ -z "$NEW_VERSION" ]; then
+if [ -z "$version" ]; then
     echo "❌ Versi tidak boleh kosong! Dibatalkan."
     exit 1
 fi
