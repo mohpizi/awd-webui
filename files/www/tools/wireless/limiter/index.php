@@ -1,11 +1,8 @@
 <?php
-// PATH SETUP (Otomatis mendeteksi folder saat ini)
-$coreScript = __DIR__ . '/core.sh';
+$coreScript ='/data/adb/php8/scrips/core_bw';
 $ruleFile   = __DIR__ . '/rules.txt';
 $dbFile     = __DIR__ . '/limits_mac.json';
 $bootFile   = '/data/adb/service.d/limiter_mac.sh';
-
-// LOAD DATABASE
 $data = file_exists($dbFile) ? json_decode(file_get_contents($dbFile), true) : [];
 if (!isset($data['limits'])) $data['limits'] = [];
 if (!isset($data['global'])) $data['global'] = [
