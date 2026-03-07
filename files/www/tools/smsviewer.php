@@ -1,124 +1,117 @@
 <?php
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
 require_once '/data/adb/php8/files/www/auth/auth_functions.php';
 
-// --- FUNCTIONS ---
+// Bypass SELinux & Root Prep
+shell_exec("su -c 'setenforce 0' 2>&1");
+
+// --- FUNCTIONS (Hybrid Logic) ---
 
 function executeCmd($cmd) {
-    // Menggunakan su -c agar command berjalan sebagai root penuh (diperlukan untuk hapus sms)
-    return shell_exec("su -c " . escapeshellarg($cmd) . " 2>&1");
+    return shell_exec("su -mm -c " . escapeshellarg($cmd) . " 2>&1");
+}
+
+function isTermuxApiAvailable() {
+    $check = shell_exec("su -c 'pm path com.termux.api'");
+    return (!empty($check) && strpos($check, 'package:') !== false);
 }
 
 function getSmsMessages() {
-    $command = "/data/data/com.termux/files/usr/bin/termux-sms-list -l 500 -t inbox"; 
-    $output = executeCmd($command);
-    $data = json_decode($output, true);
-
-    if (empty($data) || !is_array($data)) return [];
-
     $messages = [];
-    foreach ($data as $sms) {
-        $messages[] = [
-            // Kita butuh ID untuk menghapus pesan
-            'id'      => isset($sms['_id']) ? $sms['_id'] : (isset($sms['id']) ? $sms['id'] : 0),
-            'address' => isset($sms['number']) ? $sms['number'] : (isset($sms['address']) ? $sms['address'] : 'Unknown'),
-            'body'    => isset($sms['body']) ? $sms['body'] : '',
-            'date'    => isset($sms['received']) ? strtotime($sms['received']) * 1000 : time() * 1000
-        ];
+    if (isTermuxApiAvailable()) {
+        $output = executeCmd("termux-sms-list -l 500");
+        $data = json_decode($output, true);
+        if (!empty($data) && is_array($data)) {
+            foreach ($data as $sms) {
+                $messages[] = [
+                    'id'      => $sms['_id'] ?? $sms['id'] ?? 0,
+                    'address' => $sms['number'] ?? $sms['address'] ?? 'Unknown',
+                    'body'    => $sms['body'] ?? '',
+                    'date'    => isset($sms['received']) ? strtotime($sms['received']) * 1000 : time() * 1000
+                ];
+            }
+            return $messages;
+        }
+    }
+    // Fallback Root (Android 14 Compatible)
+    $cmd = "content query --uri content://sms --projection _id:address:date:body --sort 'date DESC LIMIT 500'";
+    $raw = executeCmd($cmd);
+    if (!empty($raw) && strpos($raw, 'Row:') !== false) {
+        $rows = explode("Row:", $raw);
+        foreach ($rows as $row) {
+            $row = trim($row); if (empty($row)) continue;
+            $id = $address = $date = $body = "";
+            if (preg_match('/_id=(\d+)/', $row, $m)) $id = $m[1];
+            if (preg_match('/address=(.*?),/', $row, $m)) $address = trim($m[1]);
+            if (preg_match('/date=(\d+)/', $row, $m)) $date = $m[1];
+            if (preg_match('/body=(.*)/s', $row, $m)) $body = $m[1];
+            if ($id) {
+                $messages[] = [
+                    'id' => $id, 'address' => $address ?: 'Unknown',
+                    'body' => $body, 'date' => (strlen($date) > 10) ? (int)$date : (int)$date * 1000
+                ];
+            }
+        }
     }
     return $messages;
 }
 
 function sendSms($number, $message) {
-    // Sanitasi input agar aman di shell
-    $safeNumber = escapeshellarg($number);
-    $safeMessage = escapeshellarg($message);
-    $cmd = "/data/data/com.termux/files/usr/bin/termux-sms-send -n $safeNumber $safeMessage";
-    executeCmd($cmd);
-    return true; 
+    if (isTermuxApiAvailable()) {
+        $res = executeCmd("termux-sms-send -n " . escapeshellarg($number) . " " . escapeshellarg($message));
+        if (empty($res) || strpos($res, "not found") === false) return true;
+    }
+    $dest = escapeshellarg($number); $text = escapeshellarg($message); $pkg = "\"com.android.shell\"";
+    executeCmd("service call isms 5 s16 $pkg s16 $dest s16 \"\" s16 $text i32 0 i32 0 i64 0 i32 1");
+    executeCmd("service call isms 7 i32 0 s16 $pkg s16 $dest s16 \"\" s16 $text i32 0 i32 0 i32 1");
+    return true;
 }
 
 function deleteSms($id) {
-    // Hapus via SQLite Database (Memerlukan Root)
-    // Path database SMS standar Android
-    $dbPath = "/data/data/com.android.providers.telephony/databases/mmssms.db";
-    $id = intval($id);
-    if($id > 0) {
-        $cmd = "sqlite3 $dbPath \"DELETE FROM sms WHERE _id = $id;\"";
-        executeCmd($cmd);
-        return true;
-    }
-    return false;
+    return executeCmd("content delete --uri content://sms --where \"_id=" . intval($id) . "\"");
 }
 
-function getAvatarColor($str) {
-    $hash = md5($str);
-    $r = hexdec(substr($hash, 0, 2));
-    $g = hexdec(substr($hash, 2, 2));
-    $b = hexdec(substr($hash, 4, 2));
-    return "rgba(" . $r . ", " . $g . ", " . $b . ", 0.8)";
+function getSystemLogs() {
+    return executeCmd("logcat -d -t 100 *:W | grep -iE 'sms|isms|radio' | tail -n 25");
 }
 
-function getInitial($str) {
-    return strtoupper(substr(preg_replace('/[^a-zA-Z0-9]/', '', $str), 0, 1));
-}
-
-// --- HANDLE POST REQUESTS ---
+// --- LOGIC HANDLING ---
+$activeTab = $_GET['tab'] ?? 'inbox';
 $notification = "";
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['action'])) {
         if ($_POST['action'] === 'send') {
-            $num = $_POST['number'] ?? '';
-            $msg = $_POST['message'] ?? '';
-            if (!empty($num) && !empty($msg)) {
-                sendSms($num, $msg);
-                $notification = "Pesan berhasil dikirim ke $num";
-            }
+            sendSms($_POST['number'], $_POST['message']);
+            $notification = "Terkirim!";
         } elseif ($_POST['action'] === 'delete') {
-            $id = $_POST['id'] ?? 0;
-            if ($id > 0) {
-                deleteSms($id);
-                $notification = "Pesan dihapus.";
-            }
+            deleteSms($_POST['id']);
+            $notification = "Dihapus.";
         }
     }
 }
 
-// --- PREPARE DATA ---
-$smsMessages = getSmsMessages();
+// Fetch & Grouping
+$allMessages = ($activeTab == 'inbox') ? getSmsMessages() : [];
+$selectedSender = $_GET['sender'] ?? '';
+$searchQuery = $_GET['search'] ?? '';
 
-usort($smsMessages, function($a, $b) { return $b['date'] - $a['date']; });
-$uniqueSenders = array_unique(array_column($smsMessages, 'address'));
+// 1. Filter data
+$filtered = array_filter($allMessages, function($m) use ($selectedSender, $searchQuery) {
+    $matchSender = empty($selectedSender) || $m['address'] === $selectedSender;
+    $matchSearch = empty($searchQuery) || stripos($m['body'], $searchQuery) !== false;
+    return $matchSender && $matchSearch;
+});
+
+// 2. Group by Sender
+$grouped = [];
+foreach ($filtered as $m) {
+    $grouped[$m['address']][] = $m;
+}
+
+$uniqueSenders = array_unique(array_column($allMessages, 'address'));
 sort($uniqueSenders);
-
-$selectedSender = isset($_GET['sender']) ? $_GET['sender'] : '';
-$searchQuery    = isset($_GET['search']) ? $_GET['search'] : '';
-$activeTab      = isset($_GET['tab']) ? $_GET['tab'] : 'inbox';
-
-if ($selectedSender) {
-    $smsMessages = array_filter($smsMessages, function($m) use ($selectedSender) {
-        return $m['address'] === $selectedSender;
-    });
-}
-if ($searchQuery) {
-    $smsMessages = array_filter($smsMessages, function($m) use ($searchQuery) {
-        return stripos($m['body'], $searchQuery) !== false;
-    });
-}
-
-$page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
-$perPage = 10;
-$total = count($smsMessages);
-$pages = ceil($total / $perPage);
-$offset = ($page - 1) * $perPage;
-$displayData = array_slice($smsMessages, $offset, $perPage);
-
-function url($p) {
-    global $selectedSender, $searchQuery, $activeTab;
-    $url = "?page=$p&tab=$activeTab";
-    if ($selectedSender) $url .= "&sender=" . urlencode($selectedSender);
-    if ($searchQuery) $url .= "&search=" . urlencode($searchQuery);
-    return $url;
-}
 ?>
 
 <!DOCTYPE html>
@@ -129,170 +122,124 @@ function url($p) {
     <title>SMS Manager</title>
     <style>
         :root {
-            --bg: #f8f9fa; --card: #ffffff; --text: #2d3748; --sub: #718096; --border: #e2e8f0;
-            --primary: #fb8c00; --primary-fg: #ffffff; --accent: #fff3e0;
-            --danger: #e53e3e; --radius: 12px; --shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+            --bg: #f4f7f6; --card: #ffffff; --text: #333; --border: #e0e0e0;
+            --primary: #fb8c00; --accent: #fff3e0; --danger: #ff5252;
         }
         @media (prefers-color-scheme: dark) {
-            :root {
-                --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --sub: #a0a0a0; --border: #2d2d2d;
-                --primary: #ff9800; --primary-fg: #1e1e1e; --accent: #3e2723;
-                --danger: #f56565; --shadow: 0 4px 6px -1px rgba(0,0,0,0.4);
-            }
+            :root { --bg: #121212; --card: #1e1e1e; --text: #eee; --border: #333; --accent: #2c1d10; }
         }
         * { box-sizing: border-box; margin: 0; padding: 0; outline: none; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: var(--bg); color: var(--text); padding: 16px; max-width: 800px; margin: 0 auto; padding-bottom: 80px; }
+        body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 12px; line-height: 1.5; }
         
-        .head { margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-        h1 { font-size: 1.4rem; font-weight: 700; color: var(--primary); margin: 0; text-transform: uppercase; letter-spacing: 0.5px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+        .tab-link { flex: 1; text-align: center; padding: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; text-decoration: none; color: var(--text); font-size: 0.8rem; font-weight: 600; }
+        .tab-link.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+        .filter-bar { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-bottom: 12px; display: flex; gap: 8px; }
+        .filter-input { flex: 1; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: inherit; font-size: 0.8rem; }
+        .filter-btn { background: var(--text); color: var(--card); border: none; padding: 8px 12px; border-radius: 6px; font-size: 0.8rem; }
+
+        /* Conversation Card */
+        .conv-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 10px; overflow: hidden; }
+        .conv-header { padding: 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .conv-header:active { background: var(--bg); }
+        .sender-info { font-weight: 800; color: var(--primary); font-size: 0.9rem; }
+        .msg-count { font-size: 0.7rem; background: var(--accent); color: var(--primary); padding: 2px 8px; border-radius: 10px; }
         
-        /* TABS */
-        .tabs { display: flex; background: var(--card); padding: 4px; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 20px; }
-        .tab-btn { flex: 1; text-align: center; padding: 10px; cursor: pointer; border-radius: 8px; font-weight: 600; font-size: 0.9rem; color: var(--sub); transition: 0.2s; text-decoration: none; }
-        .tab-btn.active { background: var(--accent); color: var(--primary); }
-        .tab-btn:hover:not(.active) { background: var(--bg); }
-
-        /* FILTERS & FORM */
-        .filters { background: var(--card); padding: 10px; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--border); display: flex; gap: 8px; margin-bottom: 20px; position: sticky; top: 10px; z-index: 10; }
-        .sel, .inp, .txtarea { border: 1px solid var(--border); background: var(--bg); padding: 12px; font-size: 0.95rem; color: var(--text); border-radius: 8px; flex: 1; transition: border 0.2s; font-family: inherit; }
-        .sel:focus, .inp:focus, .txtarea:focus { border-color: var(--primary); }
-        .txtarea { min-height: 120px; resize: vertical; display: block; width: 100%; margin-bottom: 15px; }
+        .conv-body { display: none; padding: 0 14px 14px 14px; border-top: 1px dashed var(--border); }
+        .conv-body.open { display: block; }
         
-        .btn { background: var(--primary); color: var(--primary-fg); border: none; padding: 0 20px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: 0.2s; display: inline-flex; align-items: center; justify-content: center; height: 42px; }
-        .btn:active { transform: scale(0.95); }
-        .btn-full { width: 100%; font-size: 1rem; }
+        .sub-msg { padding: 10px 0; border-bottom: 1px solid var(--bg); position: relative; }
+        .sub-msg:last-child { border-bottom: none; }
+        .sub-date { font-size: 0.65rem; color: #888; display: block; margin-bottom: 4px; }
+        .sub-text { font-size: 0.85rem; word-break: break-word; }
+        .del-btn { color: var(--danger); font-size: 0.65rem; background: none; border: none; font-weight: bold; cursor: pointer; margin-top: 5px; }
 
-        /* LIST */
-        .list { display: flex; flex-direction: column; gap: 10px; }
-        .msg { background: var(--card); border-radius: var(--radius); padding: 16px; border: 1px solid var(--border); display: flex; gap: 14px; transition: 0.2s; box-shadow: var(--shadow); position: relative; }
-        
-        .ava { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; font-size: 1.1rem; flex-shrink: 0; text-shadow: 0 1px 2px rgba(0,0,0,0.2); }
-        
-        .ctx { flex: 1; min-width: 0; }
-        .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-        .snd { font-weight: 700; font-size: 0.95rem; color: var(--text); }
-        .tm { font-size: 0.7rem; color: var(--sub); background: var(--bg); padding: 2px 8px; border-radius: 12px; border: 1px solid var(--border); }
-
-        .txt { font-size: 0.9rem; color: var(--sub); line-height: 1.5; word-wrap: break-word; cursor: pointer; }
-        .clp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-height: 3.2em; }
-        .exp { display: block; -webkit-line-clamp: unset; max-height: none; color: var(--text); }
-        
-        /* DELETE BUTTON */
-        .del-btn { background: transparent; border: none; color: var(--sub); cursor: pointer; padding: 5px; opacity: 0.6; transition: 0.2s; margin-left: 5px; }
-        .del-btn:hover { color: var(--danger); opacity: 1; transform: scale(1.1); }
-
-        /* PAGINATION */
-        .pgn { display: flex; justify-content: center; gap: 10px; margin-top: 30px; }
-        .pg { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; text-decoration: none; color: var(--text); background: var(--card); border: 1px solid var(--border); border-radius: 10px; font-weight: 700; transition: 0.2s; }
-        .pg.act { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
-        .pg.dis { opacity: 0.5; pointer-events: none; }
-
-        /* FORM CONTAINER */
-        .form-card { background: var(--card); border-radius: var(--radius); padding: 20px; border: 1px solid var(--border); box-shadow: var(--shadow); }
-        .form-group { margin-bottom: 15px; }
-        .label { display: block; margin-bottom: 8px; font-size: 0.9rem; font-weight: 600; color: var(--text); }
-
-        /* NOTIFICATION */
-        .notif { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #333; color: #fff; padding: 12px 24px; border-radius: 30px; font-size: 0.9rem; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 100; animation: fadeUp 0.3s ease; }
-        @keyframes fadeUp { from { transform: translate(-50%, 20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
-
-        @media (max-width: 600px) { .filters { flex-direction: column; } }
+        .form-box { background: var(--card); padding: 15px; border-radius: 12px; border: 1px solid var(--border); }
+        .log-box { background: #000; color: #0f0; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 10px; overflow-x: auto; white-space: pre-wrap; }
+        .notif { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #333; color: #fff; padding: 8px 20px; border-radius: 20px; font-size: 0.75rem; z-index: 100; }
     </style>
 </head>
 <body>
 
-    <div class="head">
-        <h1>SMS Manager</h1>
-        <?php if(!empty($notification)): ?>
-            <div class="notif" id="notif"><?= htmlspecialchars($notification) ?></div>
-            <script>setTimeout(() => { document.getElementById('notif').style.display='none'; }, 3000);</script>
+    <div class="header">
+        <h2 style="font-size: 1rem;">SMS Viewer</h2>
+        <span style="font-size: 0.6rem; opacity: 0.6;"><?= isTermuxApiAvailable() ? 'API' : 'ROOT' ?> MODE</span>
+    </div>
+
+    <?php if($notification): ?> <div class="notif" id="notif"><?= $notification ?></div> <?php endif; ?>
+
+    <nav class="tabs">
+        <a href="?tab=inbox" class="tab-link <?= $activeTab=='inbox'?'active':'' ?>">Inbox</a>
+        <a href="?tab=send" class="tab-link <?= $activeTab=='send'?'active':'' ?>">Kirim</a>
+        <a href="?tab=logs" class="tab-link <?= $activeTab=='logs'?'active':'' ?>">Log</a>
+    </nav>
+
+    <?php if ($activeTab == 'inbox'): ?>
+        <form method="GET" class="filter-bar">
+            <input type="hidden" name="tab" value="inbox">
+            <select name="sender" class="filter-input" onchange="this.form.submit()">
+                <option value="">Semua</option>
+                <?php foreach($uniqueSenders as $s): ?>
+                    <option value="<?= htmlspecialchars($s) ?>" <?= $selectedSender==$s?'selected':'' ?>><?= htmlspecialchars($s) ?></option>
+                <?php endforeach; ?>
+            </select>
+            <input type="text" name="search" class="filter-input" placeholder="Cari..." value="<?= htmlspecialchars($searchQuery) ?>">
+            <button type="submit" class="filter-btn">Cari</button>
+        </form>
+
+        <?php if(empty($grouped)): ?>
+            <p style="text-align:center; padding: 40px; color: #888;">Kosong.</p>
+        <?php else: ?>
+            <?php foreach($grouped as $sender => $msgs): ?>
+                <div class="conv-card">
+                    <div class="conv-header" onclick="this.nextElementSibling.classList.toggle('open')">
+                        <div>
+                            <span class="sender-info"><?= htmlspecialchars($sender) ?></span>
+                            <div style="font-size: 0.7rem; color: #888;"><?= htmlspecialchars(substr($msgs[0]['body'], 0, 40)) ?>...</div>
+                        </div>
+                        <span class="msg-count"><?= count($msgs) ?></span>
+                    </div>
+                    <div class="conv-body">
+                        <?php foreach($msgs as $m): ?>
+                            <div class="sub-msg">
+                                <span class="sub-date"><?= date('d M Y, H:i', $m['date']/1000) ?></span>
+                                <div class="sub-text"><?= htmlspecialchars($m['body']) ?></div>
+                                <form method="POST" onsubmit="return confirm('Hapus?')">
+                                    <input type="hidden" name="action" value="delete">
+                                    <input type="hidden" name="id" value="<?= $m['id'] ?>">
+                                    <button type="submit" class="del-btn">HAPUS</button>
+                                </form>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endforeach; ?>
         <?php endif; ?>
-    </div>
 
-    <div class="tabs">
-        <a href="?tab=inbox" class="tab-btn <?= $activeTab == 'inbox' ? 'active' : '' ?>">Inbox (<?= $total ?>)</a>
-        <a href="?tab=send" class="tab-btn <?= $activeTab == 'send' ? 'active' : '' ?>">Tulis Pesan</a>
-    </div>
-
-    <?php if ($activeTab == 'send'): ?>
-        <div class="form-card">
+    <?php elseif ($activeTab == 'send'): ?>
+        <div class="form-box">
             <form method="POST">
                 <input type="hidden" name="action" value="send">
-                <div class="form-group">
-                    <label class="label">Nomor Tujuan</label>
-                    <input type="text" name="number" class="inp" placeholder="Contoh: 08123456789" required style="width: 100%">
-                </div>
-                <div class="form-group">
-                    <label class="label">Isi Pesan</label>
-                    <textarea name="message" class="txtarea" placeholder="Tulis pesan anda disini..." required></textarea>
-                </div>
-                <button type="submit" class="btn btn-full">Kirim SMS</button>
+                <input type="text" name="number" class="filter-input" style="width:100%; margin-bottom:10px;" placeholder="Tujuan" required>
+                <textarea name="message" class="filter-input" style="width:100%; height:100px; margin-bottom:10px;" placeholder="Pesan..." required></textarea>
+                <button type="submit" class="tab-link active" style="width:100%; border:none;">KIRIM SMS</button>
             </form>
         </div>
 
-    <?php else: ?>
-        <form method="GET" class="filters">
-            <input type="hidden" name="tab" value="inbox">
-            <select name="sender" class="sel" onchange="this.form.submit()">
-                <option value="">Semua Pengirim</option>
-                <?php foreach ($uniqueSenders as $s): ?>
-                    <option value="<?= htmlspecialchars($s) ?>" <?= $selectedSender === $s ? 'selected' : '' ?>>
-                        <?= htmlspecialchars($s) ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
-            <input type="text" name="search" class="inp" placeholder="Cari pesan..." value="<?= htmlspecialchars($searchQuery) ?>" autocomplete="off">
-            <button type="submit" class="btn">Cari</button>
-        </form>
-
-        <div class="list">
-            <?php if (empty($displayData)): ?>
-                <div style="text-align:center; padding: 50px 0; color: var(--sub);">Tidak ada pesan.</div>
-            <?php else: ?>
-                <?php foreach ($displayData as $msg): ?>
-                    <div class="msg">
-                        <div class="ava" style="background-color: <?= getAvatarColor($msg['address']) ?>;">
-                            <?= getInitial($msg['address']) ?>
-                        </div>
-                        <div class="ctx">
-                            <div class="top">
-                                <span class="snd"><?= htmlspecialchars($msg['address']) ?></span>
-                                <div style="display:flex; align-items:center;">
-                                    <span class="tm"><?= date('d M, H:i', $msg['date'] / 1000) ?></span>
-                                    <form method="POST" onsubmit="return confirm('Hapus pesan ini?')" style="display:inline;">
-                                        <input type="hidden" name="action" value="delete">
-                                        <input type="hidden" name="id" value="<?= $msg['id'] ?>">
-                                        <button type="submit" class="del-btn" title="Hapus">
-                                            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/></svg>
-                                        </button>
-                                    </form>
-                                </div>
-                            </div>
-                            <div class="txt clp" onclick="tog(this)"><?= nl2br(htmlspecialchars($msg['body'])) ?></div>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
-            <?php endif; ?>
-        </div>
-
-        <?php if ($pages > 1): ?>
-            <div class="pgn">
-                <a href="<?= url($page - 1) ?>" class="pg <?= $page <= 1 ? 'dis' : '' ?>">&larr;</a>
-                <span class="pg act"><?= $page ?></span>
-                <a href="<?= url($page + 1) ?>" class="pg <?= $page >= $pages ? 'dis' : '' ?>">&rarr;</a>
+    <?php elseif ($activeTab == 'logs'): ?>
+        <div class="form-box">
+            <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size: 0.8rem;">
+                <strong>Logs</strong>
+                <a href="?tab=logs" style="color: var(--primary); text-decoration:none;">Refresh</a>
             </div>
-        <?php endif; ?>
+            <div class="log-box"><?= htmlspecialchars(getSystemLogs()) ?: 'Log kosong.' ?></div>
+        </div>
     <?php endif; ?>
 
-<script>
-    function tog(el) {
-        if (el.classList.contains('clp')) {
-            el.classList.remove('clp'); el.classList.add('exp');
-        } else {
-            el.classList.remove('exp'); el.classList.add('clp');
-        }
-    }
-</script>
-
+    <script>
+        setTimeout(() => { if(document.getElementById('notif')) document.getElementById('notif').style.display = 'none'; }, 2000);
+    </script>
 </body>
 </html>
